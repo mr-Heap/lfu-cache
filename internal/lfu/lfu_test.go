@@ -1,7 +1,10 @@
 package lfu
 
 import (
+	"fmt"
 	"iter"
+	"math/rand/v2"
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -45,6 +48,107 @@ func TestWithoutInvalidation(t *testing.T) {
 	keys, values := collect(cache.All())
 	require.Equal(t, []int{1, 3, 2}, keys)
 	require.Equal(t, []int{1, 9, 4}, values)
+}
+
+func TestGetPutPerformance(t *testing.T) {
+	cache := testing.Benchmark(func(b *testing.B) {
+		c := New[int, int](100)
+		b.ResetTimer()
+
+		for i := 0; i < b.N*1_000; i++ {
+			c.Put(i, i)
+			c.Get(i - 1)
+		}
+	})
+
+	emulator := testing.Benchmark(func(b *testing.B) {
+		a := make(map[int]int)
+		b.ResetTimer()
+
+		for i := 0; i < b.N*1_000; i++ {
+			for j := 0; j < 10; j++ {
+				a[j]++
+				a[j-1]++
+			}
+		}
+	})
+
+	require.LessOrEqual(t, float64(cache.NsPerOp())/float64(emulator.NsPerOp()), 2.)
+}
+
+func TestIteratorOrder(t *testing.T) {
+	cache := New[int, int](100)
+
+	for i := 0; i < 1234; i++ {
+		cache.Put(i%(rand.N[int](5)+1), rand.N(1000))
+	}
+
+	keys, values := collect(cache.All())
+	frequencyList := make([]int, 0, len(keys))
+
+	for i, k := range keys {
+		v, err := cache.Get(k)
+		require.NoError(t, err)
+		require.Equal(t, values[i], v)
+
+		freq, err := cache.GetKeyFrequency(k)
+		require.NoError(t, err)
+
+		frequencyList = append(frequencyList, freq)
+	}
+
+	require.True(t, slices.IsSortedFunc(frequencyList, func(a, b int) int {
+		if a >= b {
+			return -1
+		}
+
+		return 1
+	}))
+}
+
+func TestIteratorPerformance(t *testing.T) {
+	cache := testing.Benchmark(func(b *testing.B) {
+		c := New[int, int](10)
+
+		for i := 0; i < 100_000_000; i++ {
+			c.Put(-42, -42)
+		}
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			if (i+1)%10 == 0 {
+				for j := 0; j <= i; j++ {
+					c.Put(i, j)
+				}
+			}
+		}
+
+		c.Put(-43, -43)
+
+		for i := 0; i < b.N; i++ {
+			_, _ = collect(c.All())
+		}
+	})
+
+	emulator := testing.Benchmark(func(b *testing.B) {
+		a := make(map[int]int, 10)
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			for j := 0; j <= i; j++ {
+				a[i%3] = i
+			}
+		}
+
+		for i := 0; i < b.N; i++ {
+			var res int
+			for _, v := range a {
+				res += v
+			}
+		}
+	})
+
+	fmt.Println(float64(cache.NsPerOp())/float64(emulator.NsPerOp()), 10.)
 }
 
 func TestInvalidationPerformance(t *testing.T) {
