@@ -32,6 +32,7 @@ linters-settings:
         allow:
           - iter
           - errors
+          - lfucache/internal/linkedlist
 
 linters:
   enable:
