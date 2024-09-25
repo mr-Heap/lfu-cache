@@ -1,7 +1,6 @@
 package lfu
 
 import (
-	"fmt"
 	"iter"
 	"math/rand/v2"
 	"slices"
@@ -148,7 +147,7 @@ func TestIteratorPerformance(t *testing.T) {
 		}
 	})
 
-	fmt.Println(float64(cache.NsPerOp())/float64(emulator.NsPerOp()), 10.)
+	require.LessOrEqual(t, float64(cache.NsPerOp())/float64(emulator.NsPerOp()), 10.)
 }
 
 func TestInvalidationPerformance(t *testing.T) {
