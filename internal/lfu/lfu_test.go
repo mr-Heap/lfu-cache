@@ -253,6 +253,42 @@ func TestIterator(t *testing.T) {
 	require.Equal(t, []int{50, 40, 30}, values)
 }
 
+func TestIteratorDifferentFrequency(t *testing.T) {
+	t.Parallel()
+
+	cache := New[int, int](5)
+
+	cache.Put(1, 10)
+	cache.Put(2, 20)
+	cache.Put(3, 30)
+	cache.Put(4, 40)
+	cache.Put(5, 50)
+
+	for i := 1; i <= 5; i++ {
+		for range i {
+			_, _ = cache.Get(i)
+		}
+	}
+
+	iterator := cache.All()
+	keys := make([]int, 0, 2)
+	values := make([]int, 0, 2)
+
+	iterator(func(k int, v int) bool {
+		if k == 3 && v == 30 {
+			return false
+		}
+
+		keys = append(keys, k)
+		values = append(values, v)
+
+		return true
+	})
+
+	require.Equal(t, []int{5, 4}, keys)
+	require.Equal(t, []int{50, 40}, values)
+}
+
 func TestFrequencyReplacement(t *testing.T) {
 	t.Parallel()
 
