@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// compile
+// must compile
 func testImplements[K comparable, V any]() Cache[K, V] {
 	return New[K, V](1)
 }
@@ -105,6 +105,42 @@ func TestIteratorOrder(t *testing.T) {
 	}))
 }
 
+func TestIteratorDifferentFrequency(t *testing.T) {
+	t.Parallel()
+
+	cache := New[int, int](5)
+
+	cache.Put(1, 10)
+	cache.Put(2, 20)
+	cache.Put(3, 30)
+	cache.Put(4, 40)
+	cache.Put(5, 50)
+
+	for i := 1; i <= 5; i++ {
+		for range i {
+			_, _ = cache.Get(i)
+		}
+	}
+
+	iterator := cache.All()
+	keys := make([]int, 0, 2)
+	values := make([]int, 0, 2)
+
+	iterator(func(k int, v int) bool {
+		if k == 3 && v == 30 {
+			return false
+		}
+
+		keys = append(keys, k)
+		values = append(values, v)
+
+		return true
+	})
+
+	require.Equal(t, []int{5, 4}, keys)
+	require.Equal(t, []int{50, 40}, values)
+}
+
 func TestIteratorPerformance(t *testing.T) {
 	cache := testing.Benchmark(func(b *testing.B) {
 		c := New[int, int](10)
@@ -171,6 +207,34 @@ func TestInvalidationPerformance(t *testing.T) {
 		}
 
 		coldCache.Put(42, 42)
+	})
+
+	require.LessOrEqual(t, float64(hot.NsPerOp())/float64(cold.NsPerOp()), 1.05)
+}
+
+func TestInvalidationPerformanceWithGroups(t *testing.T) {
+	const capacity = 10_000_000
+
+	hotCache := New[int, int](capacity)
+
+	for i := 0; i < capacity; i++ {
+		for j := 0; j < 3; j++ {
+			hotCache.Put(i, i)
+		}
+	}
+
+	hot := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			hotCache.Put(i%1_000_000, 1)
+		}
+	})
+
+	cold := testing.Benchmark(func(b *testing.B) {
+		coldCache := New[int, int](capacity)
+
+		for i := 0; i < b.N; i++ {
+			coldCache.Put(i%1_000_000, 1)
+		}
 	})
 
 	require.LessOrEqual(t, float64(hot.NsPerOp())/float64(cold.NsPerOp()), 1.05)
@@ -251,42 +315,6 @@ func TestIterator(t *testing.T) {
 
 	require.Equal(t, []int{5, 4, 3}, keys)
 	require.Equal(t, []int{50, 40, 30}, values)
-}
-
-func TestIteratorDifferentFrequency(t *testing.T) {
-	t.Parallel()
-
-	cache := New[int, int](5)
-
-	cache.Put(1, 10)
-	cache.Put(2, 20)
-	cache.Put(3, 30)
-	cache.Put(4, 40)
-	cache.Put(5, 50)
-
-	for i := 1; i <= 5; i++ {
-		for range i {
-			_, _ = cache.Get(i)
-		}
-	}
-
-	iterator := cache.All()
-	keys := make([]int, 0, 2)
-	values := make([]int, 0, 2)
-
-	iterator(func(k int, v int) bool {
-		if k == 3 && v == 30 {
-			return false
-		}
-
-		keys = append(keys, k)
-		values = append(values, v)
-
-		return true
-	})
-
-	require.Equal(t, []int{5, 4}, keys)
-	require.Equal(t, []int{50, 40}, values)
 }
 
 func TestFrequencyReplacement(t *testing.T) {

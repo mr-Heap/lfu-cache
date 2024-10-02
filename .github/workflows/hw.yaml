@@ -6,7 +6,7 @@ on:
 jobs:
   workflow:
     runs-on: self-hosted
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
