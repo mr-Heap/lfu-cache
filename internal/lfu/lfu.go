@@ -60,7 +60,18 @@ type nodeList[K comparable, V any] struct {
 	last      *nodeValue[K, V]
 }
 
-// newNodeList creates a new node list with the specified parameters.
+// newNodeList creates a new node list with the specified frequency,
+// first and last nodes, and pointers to the previous and next node lists.
+//
+// Arguments:
+//   - frequency: The frequency of the new node list.
+//   - first: The first node value in the list.
+//   - last: The last node value in the list.
+//   - prev: A pointer to the previous node list.
+//   - next: A pointer to the next node list.
+//
+// Returns:
+//   - A pointer to the newly created node list.
 func newNodeList[K comparable, V any](frequency int, first, last *nodeValue[K, V], prev, next *nodeList[K, V]) *nodeList[K, V] {
 	return &nodeList[K, V]{
 		frequency: frequency,
@@ -85,14 +96,23 @@ type list[K comparable, V any] struct {
 	sentinel *nodeList[K, V] // sentinel.next = head, sentinel.prev = tail
 }
 
-// newList initializes a new list with a sentinel node.
+// newList initializes a new list with a sentinel node to facilitate
+// easier insertion and deletion operations.
+//
+// Returns:
+//   - A pointer to the newly created list instance.
 func newList[K comparable, V any]() *list[K, V] {
 	sentinel := newNodeList[K, V](0, nil, nil, nil, nil)
 	return &list[K, V]{sentinel: sentinel}
 }
 
 // addListFrontOrAfter adds a new node list with the specified frequency
-// in front of or after the specified node list.
+// in front of or after the specified node list in the linked list of frequency nodes.
+//
+// Arguments:
+//   - frequency: The frequency of the new node list to be added.
+//   - first: The first node value associated with the new frequency node.
+//   - before: An optional parameter specifying the node list after which to add the new node list.
 func (l *list[K, V]) addListFrontOrAfter(frequency int, first *nodeValue[K, V], before ...*nodeList[K, V]) {
 	bfr := l.sentinel
 	if len(before) > 0 {
@@ -113,6 +133,10 @@ func (l *list[K, V]) addListFrontOrAfter(frequency int, first *nodeValue[K, V], 
 }
 
 // addFrontByFreq adds a new node value to the front of the frequency list.
+// It updates the linked list pointers accordingly.
+//
+// Arguments:
+//   - newFirst: The new node value to be added at the front of the frequency list.
 func (l *nodeList[K, V]) addFrontByFreq(newFirst *nodeValue[K, V]) {
 	newFirst.prev = nil
 	newFirst.next = l.first
@@ -128,8 +152,15 @@ type cacheImpl[K comparable, V any] struct {
 	mp          map[K]*nodeValue[K, V]
 }
 
-// New initializes the cache with the given capacity.
-// If no capacity is provided, the cache will use DefaultCapacity.
+// New initializes the cache with the specified capacity.
+// If no capacity is provided, it defaults to DefaultCapacity.
+//
+// Arguments:
+//   - capacity: Optional integer specifying the initial capacity of the cache.
+//     Must be a positive number if provided.
+//
+// Returns:
+//   - A pointer to a new cacheImpl instance.
 func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 	resultCapacity := DefaultCapacity
 	if len(capacity) > 0 {
@@ -146,7 +177,8 @@ func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 	}
 }
 
-// untie disconnects the node from its linked list.
+// untie disconnects the node from its linked list, effectively removing it from the current frequency list.
+// This operation is used when a node's frequency needs to be updated.
 func (value *nodeValue[K, V]) untie() {
 	if value.prev != nil {
 		value.prev.next = value.next
@@ -265,6 +297,7 @@ func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
 }
 
 // delLast removes the least frequently used item from the cache.
+// It updates the internal data structures accordingly to maintain the LFU policy.
 func (l *cacheImpl[K, V]) delLast() {
 	lastFreqNode := l.frequencies.sentinel.next
 	if lastFreqNode == nil {
