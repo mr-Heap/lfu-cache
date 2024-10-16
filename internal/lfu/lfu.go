@@ -7,6 +7,7 @@ import (
 
 var ErrKeyNotFound = errors.New("key not found")
 
+// DefaultCapacity represents the default capacity of the LFU Cache
 const DefaultCapacity = 5
 
 // Cache
