@@ -1,6 +1,5 @@
 package lfu
 
-// TODO: optimize что хранить в структурах
 import (
 	"errors"
 	"iter"
@@ -51,6 +50,7 @@ type Cache[K comparable, V any] interface {
 	GetKeyFrequency(key K) (int, error)
 }
 
+// nodeList represents a list of nodes sharing the same frequency.
 type nodeList[K comparable, V any] struct {
 	frequency int
 	prev      *nodeList[K, V]
@@ -59,6 +59,7 @@ type nodeList[K comparable, V any] struct {
 	last      *nodeValue[K, V]
 }
 
+// newNodeList creates a new node list with the specified parameters.
 func newNodeList[K comparable, V any](frequency int, first, last *nodeValue[K, V], prev, next *nodeList[K, V]) *nodeList[K, V] {
 	return &nodeList[K, V]{
 		frequency: frequency,
@@ -69,6 +70,7 @@ func newNodeList[K comparable, V any](frequency int, first, last *nodeValue[K, V
 	}
 }
 
+// nodeValue represents a value in a list for the same frequency
 type nodeValue[K comparable, V any] struct {
 	key       K
 	value     V
@@ -77,15 +79,19 @@ type nodeValue[K comparable, V any] struct {
 	frequency *nodeList[K, V]
 }
 
+// list represents a doubly linked list of nodeList.
 type list[K comparable, V any] struct {
 	sentinel *nodeList[K, V] // sentinel.next = head, sentinel.prev = tail
 }
 
+// newList initializes a new list with a sentinel node.
 func newList[K comparable, V any]() *list[K, V] {
 	sentinel := newNodeList[K, V](0, nil, nil, nil, nil)
 	return &list[K, V]{sentinel: sentinel}
 }
 
+// addListFrontOrAfter adds a new node list with the specified frequency
+// in front of or after the specified node list.
 func (l *list[K, V]) addListFrontOrAfter(frequency int, first *nodeValue[K, V], before ...*nodeList[K, V]) {
 	bfr := l.sentinel
 	if len(before) > 0 {
@@ -105,6 +111,7 @@ func (l *list[K, V]) addListFrontOrAfter(frequency int, first *nodeValue[K, V], 
 	first.prev = nil
 }
 
+// addFrontByFreq adds a new node value to the front of the frequency list.
 func (l *nodeList[K, V]) addFrontByFreq(newFirst *nodeValue[K, V]) {
 	newFirst.prev = nil
 	newFirst.next = l.first
@@ -116,7 +123,6 @@ func (l *nodeList[K, V]) addFrontByFreq(newFirst *nodeValue[K, V]) {
 // cacheImpl represents LFU cache implementation
 type cacheImpl[K comparable, V any] struct {
 	capacity    int
-	size        int
 	frequencies list[K, V]
 	mp          map[K]*nodeValue[K, V]
 }
@@ -139,6 +145,7 @@ func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 	}
 }
 
+// untie disconnects the node from its linked list.
 func (value *nodeValue[K, V]) untie() {
 	if value.prev != nil {
 		value.prev.next = value.next
@@ -156,6 +163,10 @@ func (value *nodeValue[K, V]) untie() {
 	value.next = nil
 }
 
+// Get returns the value of the key if the key exists in the cache,
+// otherwise, returns ErrKeyNotFound.
+//
+// O(1)
 func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 	value, exists := l.mp[key]
 	if !exists {
@@ -180,6 +191,13 @@ func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 	return value.value, nil
 }
 
+// Put updates the value of the key if present, or inserts the key if not already present.
+//
+// When the cache reaches its capacity, it should invalidate and remove the least frequently used key
+// before inserting a new item. For this problem, when there is a tie
+// (i.e., two or more keys with the same frequencies), the least recently used key would be invalidated.
+//
+// O(1)
 func (l *cacheImpl[K, V]) Put(key K, value V) {
 	if node, exists := l.mp[key]; exists {
 		node.value = value
@@ -190,10 +208,8 @@ func (l *cacheImpl[K, V]) Put(key K, value V) {
 		return
 	}
 
-	l.size++
-	if l.Size() > l.capacity {
+	if l.Size() >= l.capacity {
 		l.delLast()
-		l.size--
 	}
 
 	node := &nodeValue[K, V]{key: key, value: value, frequency: l.frequencies.sentinel.next}
@@ -205,6 +221,10 @@ func (l *cacheImpl[K, V]) Put(key K, value V) {
 	l.mp[key] = node
 }
 
+// All returns the iterator in descending order of frequencies.
+// If two or more keys have the same frequencies, the most recently used key will be listed first.
+//
+// O(capacity)
 func (l *cacheImpl[K, V]) All() iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		for freqNode := l.frequencies.sentinel.prev; freqNode != nil && freqNode != l.frequencies.sentinel; freqNode = freqNode.prev {
@@ -217,14 +237,24 @@ func (l *cacheImpl[K, V]) All() iter.Seq2[K, V] {
 	}
 }
 
+// Size returns the cache size using the map size
+//
+// O(1)
 func (l *cacheImpl[K, V]) Size() int {
-	return l.size
+	return len(l.mp)
 }
 
+// Capacity returns the cache capacity.
+//
+// O(1)
 func (l *cacheImpl[K, V]) Capacity() int {
 	return l.capacity
 }
 
+// GetKeyFrequency returns the element's frequencies if the key exists in the cache,
+// otherwise, returns ErrKeyNotFound.
+//
+// O(1)
 func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
 	val, ex := l.mp[key]
 	if !ex {
@@ -233,6 +263,7 @@ func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
 	return val.frequency.frequency, nil
 }
 
+// delLast removes the least frequently used item from the cache.
 func (l *cacheImpl[K, V]) delLast() {
 	lastFreqNode := l.frequencies.sentinel.next
 	if lastFreqNode == nil {
