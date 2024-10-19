@@ -52,24 +52,18 @@ type Cache[K comparable, V any] interface {
 	GetKeyFrequency(key K) (int, error)
 }
 
-// delLast removes the least frequently used item from the cache.
-// It updates the internal data structures accordingly to maintain the LFU policy.
-func (l *cacheImpl[K, V]) delLast() {
-	node := l.frequencies.First().Value.Last()
-	node.Untie()
-	delete(l.mp, node.Key)
-	delete(l.mpFrequency, node.Key)
-	if l.frequencies.First().Value.IsEmpty() {
-		l.frequencies.First().Untie()
-	}
+type BaseNode[K comparable, V any] *linkedlist.Node[int, *linkedlist.List[K, V]]
+
+type cacheNode[K comparable, V any] struct {
+	node     *linkedlist.Node[K, V]
+	baseNode *linkedlist.Node[int, *linkedlist.List[K, V]]
 }
 
 // cacheImpl represents LFU cache implementation
 type cacheImpl[K comparable, V any] struct {
 	capacity    int
 	frequencies linkedlist.List[int, *linkedlist.List[K, V]]
-	mp          map[K]*linkedlist.Node[K, V]
-	mpFrequency map[K]*linkedlist.Node[int, *linkedlist.List[K, V]]
+	mp          map[K]*cacheNode[K, V]
 }
 
 // New initializes the cache with the specified capacity.
@@ -93,8 +87,7 @@ func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 	return &cacheImpl[K, V]{
 		capacity:    resultCapacity,
 		frequencies: *linkedlist.NewList[int, *linkedlist.List[K, V]](),
-		mp:          make(map[K]*linkedlist.Node[K, V]),
-		mpFrequency: make(map[K]*linkedlist.Node[int, *linkedlist.List[K, V]]),
+		mp:          make(map[K]*cacheNode[K, V]),
 	}
 }
 
@@ -103,14 +96,14 @@ func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 //
 // O(1)
 func (l *cacheImpl[K, V]) Get(key K) (V, error) {
-	value, exists := l.mp[key]
+	node, exists := l.mp[key]
 	if !exists {
 		var zeroVal V
 		return zeroVal, ErrKeyNotFound
 	}
-
+	value := node.node
+	currentFreq := node.baseNode
 	value.Untie()
-	currentFreq := l.mpFrequency[key]
 	if currentFreq == l.frequencies.Last() || currentFreq.Next().Key != currentFreq.Key+1 {
 		newList := linkedlist.NewList[K, V]()
 		newList.AddFrontOrAfter(value)
@@ -118,7 +111,7 @@ func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 	} else {
 		currentFreq.Next().Value.AddFrontOrAfter(value)
 	}
-	l.mpFrequency[key] = currentFreq.Next()
+	node.baseNode = currentFreq.Next()
 
 	if currentFreq.Value.IsEmpty() {
 		currentFreq.Untie()
@@ -131,11 +124,11 @@ func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 //
 // O(1)
 func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
-	val, ex := l.mpFrequency[key]
+	val, ex := l.mp[key]
 	if !ex {
 		return 0, ErrKeyNotFound
 	}
-	return val.Key, nil
+	return val.baseNode.Key, nil
 }
 
 // // Put updates the value of the key if present, or inserts the key if not already present.
@@ -146,8 +139,8 @@ func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
 // //
 // // O(1)
 func (l *cacheImpl[K, V]) Put(key K, value V) {
-	if node, exists := l.mp[key]; exists {
-		node.Value = value
+	if cached, exists := l.mp[key]; exists {
+		cached.node.Value = value
 		_, err := l.Get(key)
 		if err != nil {
 			panic(err)
@@ -167,8 +160,18 @@ func (l *cacheImpl[K, V]) Put(key K, value V) {
 		newList.AddFrontOrAfter(node)
 		l.frequencies.AddFrontOrAfter(linkedlist.NewNode(1, newList))
 	}
-	l.mpFrequency[key] = l.frequencies.First()
-	l.mp[key] = node
+	l.mp[key] = &cacheNode[K, V]{node: node, baseNode: l.frequencies.First()}
+}
+
+// delLast removes the least frequently used item from the cache.
+// It updates the internal data structures accordingly to maintain the LFU policy.
+func (l *cacheImpl[K, V]) delLast() {
+	node := l.frequencies.First().Value.Last()
+	node.Untie()
+	delete(l.mp, node.Key)
+	if l.frequencies.First().Value.IsEmpty() {
+		l.frequencies.First().Untie()
+	}
 }
 
 // Size returns the cache size using the map size
