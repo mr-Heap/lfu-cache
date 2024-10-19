@@ -117,6 +117,10 @@ func (l *cacheImpl[K, V]) hangUpNode(node *cacheNode[K, V]) *linkedlist.Node[K, 
 	}
 	node.baseNode = currentFreq.Next()
 
+	if currentFreq.Value.IsEmpty() {
+		currentFreq.Untie()
+	}
+
 	return value
 }
 

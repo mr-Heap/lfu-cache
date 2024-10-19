@@ -13,9 +13,7 @@ type Node[K comparable, V any] struct {
 // NewNode creates a new node with the specified key and value.
 // It initializes the next and previous pointers with empty nodes.
 func NewNode[K comparable, V any](key K, value V) *Node[K, V] {
-	next := &Node[K, V]{}
-	prev := &Node[K, V]{}
-	return &Node[K, V]{Key: key, Value: value, next: next, prev: prev}
+	return &Node[K, V]{Key: key, Value: value, next: nil, prev: nil}
 }
 
 // List represents a doubly linked list.
