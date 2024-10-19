@@ -52,8 +52,6 @@ type Cache[K comparable, V any] interface {
 	GetKeyFrequency(key K) (int, error)
 }
 
-type BaseNode[K comparable, V any] *linkedlist.Node[int, *linkedlist.List[K, V]]
-
 type cacheNode[K comparable, V any] struct {
 	node     *linkedlist.Node[K, V]
 	baseNode *linkedlist.Node[int, *linkedlist.List[K, V]]
@@ -118,10 +116,6 @@ func (l *cacheImpl[K, V]) hangUpNode(node *cacheNode[K, V]) *linkedlist.Node[K, 
 		nextFreq.Value.AddFrontOrAfter(value)
 	}
 	node.baseNode = currentFreq.Next()
-
-	if currentFreq.Value.IsEmpty() {
-		currentFreq.Untie()
-	}
 
 	return value
 }
