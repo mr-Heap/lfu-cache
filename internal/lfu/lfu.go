@@ -101,22 +101,29 @@ func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 		var zeroVal V
 		return zeroVal, ErrKeyNotFound
 	}
+
+	return l.hangUpNode(node).Value, nil
+}
+
+func (l *cacheImpl[K, V]) hangUpNode(node *cacheNode[K, V]) *linkedlist.Node[K, V] {
 	value := node.node
 	currentFreq := node.baseNode
+	nextFreq := currentFreq.Next()
 	value.Untie()
-	if currentFreq == l.frequencies.Last() || currentFreq.Next().Key != currentFreq.Key+1 {
+	if currentFreq == l.frequencies.Last() || nextFreq.Key != currentFreq.Key+1 {
 		newList := linkedlist.NewList[K, V]()
 		newList.AddFrontOrAfter(value)
 		l.frequencies.AddFrontOrAfter(linkedlist.NewNode(currentFreq.Key+1, newList), currentFreq)
 	} else {
-		currentFreq.Next().Value.AddFrontOrAfter(value)
+		nextFreq.Value.AddFrontOrAfter(value)
 	}
 	node.baseNode = currentFreq.Next()
 
 	if currentFreq.Value.IsEmpty() {
 		currentFreq.Untie()
 	}
-	return value.Value, nil
+
+	return value
 }
 
 // GetKeyFrequency returns the element's frequencies if the key exists in the cache,
@@ -131,20 +138,17 @@ func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
 	return val.baseNode.Key, nil
 }
 
-// // Put updates the value of the key if present, or inserts the key if not already present.
-// //
-// // When the cache reaches its capacity, it should invalidate and remove the least frequently used key
-// // before inserting a new item. For this problem, when there is a tie
-// // (i.e., two or more keys with the same frequencies), the least recently used key would be invalidated.
-// //
-// // O(1)
+// Put updates the value of the key if present, or inserts the key if not already present.
+//
+// When the cache reaches its capacity, it should invalidate and remove the least frequently used key
+// before inserting a new item. For this problem, when there is a tie
+// (i.e., two or more keys with the same frequencies), the least recently used key would be invalidated.
+//
+// O(1)
 func (l *cacheImpl[K, V]) Put(key K, value V) {
 	if cached, exists := l.mp[key]; exists {
 		cached.node.Value = value
-		_, err := l.Get(key)
-		if err != nil {
-			panic(err)
-		}
+		_ = l.hangUpNode(cached)
 		return
 	}
 
