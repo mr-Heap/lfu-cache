@@ -3,6 +3,7 @@ package lfu
 import (
 	"errors"
 	"iter"
+	"lfucache/internal/linkedlist"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -51,105 +52,24 @@ type Cache[K comparable, V any] interface {
 	GetKeyFrequency(key K) (int, error)
 }
 
-// nodeList represents a list of nodes sharing the same frequency.
-type nodeList[K comparable, V any] struct {
-	frequency int
-	prev      *nodeList[K, V]
-	next      *nodeList[K, V]
-	first     *nodeValue[K, V]
-	last      *nodeValue[K, V]
-}
-
-// newNodeList creates a new node list with the specified frequency,
-// first and last nodes, and pointers to the previous and next node lists.
-//
-// Arguments:
-//   - frequency: The frequency of the new node list.
-//   - first: The first node value in the list.
-//   - last: The last node value in the list.
-//   - prev: A pointer to the previous node list.
-//   - next: A pointer to the next node list.
-//
-// Returns:
-//   - A pointer to the newly created node list.
-func newNodeList[K comparable, V any](frequency int, first, last *nodeValue[K, V], prev, next *nodeList[K, V]) *nodeList[K, V] {
-	return &nodeList[K, V]{
-		frequency: frequency,
-		first:     first,
-		last:      last,
-		prev:      prev,
-		next:      next,
+// delLast removes the least frequently used item from the cache.
+// It updates the internal data structures accordingly to maintain the LFU policy.
+func (l *cacheImpl[K, V]) delLast() {
+	node := l.frequencies.First().Value.Last()
+	node.Untie()
+	delete(l.mp, node.Key)
+	delete(l.mpFrequency, node.Key)
+	if l.frequencies.First().Value.IsEmpty() {
+		l.frequencies.First().Untie()
 	}
-}
-
-// nodeValue represents a value in a list for the same frequency
-type nodeValue[K comparable, V any] struct {
-	key       K
-	value     V
-	next      *nodeValue[K, V]
-	prev      *nodeValue[K, V]
-	frequency *nodeList[K, V]
-}
-
-// list represents a doubly linked list of nodeList.
-type list[K comparable, V any] struct {
-	sentinel *nodeList[K, V] // sentinel.next = head, sentinel.prev = tail
-}
-
-// newList initializes a new list with a sentinel node to facilitate
-// easier insertion and deletion operations.
-//
-// Returns:
-//   - A pointer to the newly created list instance.
-func newList[K comparable, V any]() *list[K, V] {
-	sentinel := newNodeList[K, V](0, nil, nil, nil, nil)
-	return &list[K, V]{sentinel: sentinel}
-}
-
-// addListFrontOrAfter adds a new node list with the specified frequency
-// in front of or after the specified node list in the linked list of frequency nodes.
-//
-// Arguments:
-//   - frequency: The frequency of the new node list to be added.
-//   - first: The first node value associated with the new frequency node.
-//   - before: An optional parameter specifying the node list after which to add the new node list.
-func (l *list[K, V]) addListFrontOrAfter(frequency int, first *nodeValue[K, V], before ...*nodeList[K, V]) {
-	bfr := l.sentinel
-	if len(before) > 0 {
-		bfr = before[0]
-	}
-
-	node := newNodeList(frequency, first, first, bfr, bfr.next)
-
-	bfr.next = node
-	if node.next != nil {
-		node.next.prev = node
-	} else {
-		l.sentinel.prev = node
-	}
-
-	first.frequency = node
-	first.prev = nil
-}
-
-// addFrontByFreq adds a new node value to the front of the frequency list.
-// It updates the linked list pointers accordingly.
-//
-// Arguments:
-//   - newFirst: The new node value to be added at the front of the frequency list.
-func (l *nodeList[K, V]) addFrontByFreq(newFirst *nodeValue[K, V]) {
-	newFirst.prev = nil
-	newFirst.next = l.first
-	l.first.prev = newFirst
-	l.first = newFirst
-	newFirst.frequency = l
 }
 
 // cacheImpl represents LFU cache implementation
 type cacheImpl[K comparable, V any] struct {
 	capacity    int
-	frequencies list[K, V]
-	mp          map[K]*nodeValue[K, V]
+	frequencies linkedlist.List[int, *linkedlist.List[K, V]]
+	mp          map[K]*linkedlist.Node[K, V]
+	mpFrequency map[K]*linkedlist.Node[int, *linkedlist.List[K, V]]
 }
 
 // New initializes the cache with the specified capacity.
@@ -172,28 +92,10 @@ func New[K comparable, V any](capacity ...int) *cacheImpl[K, V] {
 
 	return &cacheImpl[K, V]{
 		capacity:    resultCapacity,
-		mp:          make(map[K]*nodeValue[K, V], resultCapacity),
-		frequencies: *newList[K, V](),
+		frequencies: *linkedlist.NewList[int, *linkedlist.List[K, V]](),
+		mp:          make(map[K]*linkedlist.Node[K, V]),
+		mpFrequency: make(map[K]*linkedlist.Node[int, *linkedlist.List[K, V]]),
 	}
-}
-
-// untie disconnects the node from its linked list, effectively removing it from the current frequency list.
-// This operation is used when a node's frequency needs to be updated.
-func (value *nodeValue[K, V]) untie() {
-	if value.prev != nil {
-		value.prev.next = value.next
-	}
-	if value.next != nil {
-		value.next.prev = value.prev
-	}
-	if value.frequency.first == value {
-		value.frequency.first = value.next
-	}
-	if value.frequency.last == value {
-		value.frequency.last = value.prev
-	}
-	value.prev = nil
-	value.next = nil
 }
 
 // Get returns the value of the key if the key exists in the cache,
@@ -207,33 +109,45 @@ func (l *cacheImpl[K, V]) Get(key K) (V, error) {
 		return zeroVal, ErrKeyNotFound
 	}
 
-	value.untie()
-	currentNode := value.frequency
-	if next := currentNode.next; next == nil || currentNode.frequency+1 != next.frequency {
-		l.frequencies.addListFrontOrAfter(currentNode.frequency+1, value, currentNode)
+	value.Untie()
+	currentFreq := l.mpFrequency[key]
+	if currentFreq == l.frequencies.Last() || currentFreq.Next().Key != currentFreq.Key+1 {
+		newList := linkedlist.NewList[K, V]()
+		newList.AddFrontOrAfter(value)
+		l.frequencies.AddFrontOrAfter(linkedlist.NewNode(currentFreq.Key+1, newList), currentFreq)
 	} else {
-		currentNode.next.addFrontByFreq(value)
+		currentFreq.Next().Value.AddFrontOrAfter(value)
 	}
-	if currentNode.first == nil {
-		prevNode := currentNode.prev
-		prevNode.next = currentNode.next
-		if currentNode.next != nil {
-			currentNode.next.prev = prevNode
-		}
+	l.mpFrequency[key] = currentFreq.Next()
+
+	if currentFreq.Value.IsEmpty() {
+		currentFreq.Untie()
 	}
-	return value.value, nil
+	return value.Value, nil
 }
 
-// Put updates the value of the key if present, or inserts the key if not already present.
-//
-// When the cache reaches its capacity, it should invalidate and remove the least frequently used key
-// before inserting a new item. For this problem, when there is a tie
-// (i.e., two or more keys with the same frequencies), the least recently used key would be invalidated.
+// GetKeyFrequency returns the element's frequencies if the key exists in the cache,
+// otherwise, returns ErrKeyNotFound.
 //
 // O(1)
+func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
+	val, ex := l.mpFrequency[key]
+	if !ex {
+		return 0, ErrKeyNotFound
+	}
+	return val.Key, nil
+}
+
+// // Put updates the value of the key if present, or inserts the key if not already present.
+// //
+// // When the cache reaches its capacity, it should invalidate and remove the least frequently used key
+// // before inserting a new item. For this problem, when there is a tie
+// // (i.e., two or more keys with the same frequencies), the least recently used key would be invalidated.
+// //
+// // O(1)
 func (l *cacheImpl[K, V]) Put(key K, value V) {
 	if node, exists := l.mp[key]; exists {
-		node.value = value
+		node.Value = value
 		_, err := l.Get(key)
 		if err != nil {
 			panic(err)
@@ -245,29 +159,16 @@ func (l *cacheImpl[K, V]) Put(key K, value V) {
 		l.delLast()
 	}
 
-	node := &nodeValue[K, V]{key: key, value: value, frequency: l.frequencies.sentinel.next}
-	if firstFreqNode := l.frequencies.sentinel.next; firstFreqNode == nil || firstFreqNode.frequency != 1 {
-		l.frequencies.addListFrontOrAfter(1, node)
+	node := linkedlist.NewNode(key, value)
+	if l.frequencies.First().Key == 1 {
+		l.frequencies.First().Value.AddFrontOrAfter(node)
 	} else {
-		firstFreqNode.addFrontByFreq(node)
+		newList := linkedlist.NewList[K, V]()
+		newList.AddFrontOrAfter(node)
+		l.frequencies.AddFrontOrAfter(linkedlist.NewNode(1, newList))
 	}
+	l.mpFrequency[key] = l.frequencies.First()
 	l.mp[key] = node
-}
-
-// All returns the iterator in descending order of frequencies.
-// If two or more keys have the same frequencies, the most recently used key will be listed first.
-//
-// O(capacity)
-func (l *cacheImpl[K, V]) All() iter.Seq2[K, V] {
-	return func(yield func(K, V) bool) {
-		for freqNode := l.frequencies.sentinel.prev; freqNode != nil && freqNode != l.frequencies.sentinel; freqNode = freqNode.prev {
-			for valNode := freqNode.first; valNode != nil; valNode = valNode.next {
-				if !yield(valNode.key, valNode.value) {
-					return
-				}
-			}
-		}
-	}
 }
 
 // Size returns the cache size using the map size
@@ -284,33 +185,18 @@ func (l *cacheImpl[K, V]) Capacity() int {
 	return l.capacity
 }
 
-// GetKeyFrequency returns the element's frequencies if the key exists in the cache,
-// otherwise, returns ErrKeyNotFound.
+// All returns the iterator in descending order of frequencies.
+// If two or more keys have the same frequencies, the most recently used key will be listed first.
 //
-// O(1)
-func (l *cacheImpl[K, V]) GetKeyFrequency(key K) (int, error) {
-	val, ex := l.mp[key]
-	if !ex {
-		return 0, ErrKeyNotFound
-	}
-	return val.frequency.frequency, nil
-}
-
-// delLast removes the least frequently used item from the cache.
-// It updates the internal data structures accordingly to maintain the LFU policy.
-func (l *cacheImpl[K, V]) delLast() {
-	lastFreqNode := l.frequencies.sentinel.next
-	if lastFreqNode == nil {
-		return
-	}
-	delete(l.mp, lastFreqNode.last.key)
-	if lastFreqNode.first == nil || lastFreqNode.first.next == nil {
-		if lastFreqNode.next != nil {
-			lastFreqNode.next.prev = l.frequencies.sentinel
+// O(capacity)
+func (l *cacheImpl[K, V]) All() iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for freqNode := l.frequencies.Last(); freqNode != l.frequencies.First().Prev(); freqNode = freqNode.Prev() {
+			for valNode := freqNode.Value.First(); valNode != freqNode.Value.Last().Next(); valNode = valNode.Next() {
+				if !yield(valNode.Key, valNode.Value) {
+					return
+				}
+			}
 		}
-		l.frequencies.sentinel.next = l.frequencies.sentinel.next.next
-		return
 	}
-	lastFreqNode.last.prev.next = nil
-	l.frequencies.sentinel.next.last = lastFreqNode.last.prev
 }
