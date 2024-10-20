@@ -196,9 +196,13 @@ func (l *cacheImpl[K, V]) Capacity() int {
 // O(capacity)
 func (l *cacheImpl[K, V]) All() iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
-		for freqNode := l.frequencies.Last(); freqNode != l.frequencies.First().Prev(); freqNode = freqNode.Prev() {
-			for valNode := freqNode.Value.First(); valNode != freqNode.Value.Last().Next(); valNode = valNode.Next() {
-				if !yield(valNode.Key, valNode.Value) {
+		end := l.frequencies.End()
+		start := l.frequencies.End().Prev()
+		for itList := start; !itList.Equals(end); itList = itList.Prev() {
+			valBegin := itList.Value().Value.Begin()
+			valEnd := itList.Value().Value.End()
+			for valNode := valBegin; !valNode.Equals(valEnd); valNode = valNode.Next() {
+				if !yield(valNode.Value().Key, valNode.Value().Value) {
 					return
 				}
 			}

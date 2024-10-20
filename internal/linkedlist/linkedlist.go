@@ -86,3 +86,51 @@ func (n *Node[K, V]) Next() *Node[K, V] {
 func (n *Node[K, V]) Prev() *Node[K, V] {
 	return n.prev
 }
+
+// Iterator represents an iterator for the List.
+// It provides methods to traverse the list in both forward and backward directions.
+type Iterator[K comparable, V any] struct {
+	current *Node[K, V]
+}
+
+// Value returns the current node that the iterator is pointing to.
+// It returns a pointer to the Node[K, V].
+func (it *Iterator[K, V]) Value() *Node[K, V] {
+	return it.current
+}
+
+// Begin initializes an iterator to point to the first element in the list.
+// It returns a pointer to an Iterator[K, V] starting at the first node after the sentinel.
+func (l *List[K, V]) Begin() *Iterator[K, V] {
+	return &Iterator[K, V]{
+		current: l.sentinel.next,
+	}
+}
+
+// End initializes an iterator to point to the end of the list.
+// It returns a pointer to an Iterator[K, V] pointing to the sentinel node (after the last element).
+func (l *List[K, V]) End() *Iterator[K, V] {
+	return &Iterator[K, V]{
+		current: l.sentinel,
+	}
+}
+
+// Next advances the iterator to the next node in the list.
+// It returns the updated iterator pointing to the next node.
+func (it *Iterator[K, V]) Next() *Iterator[K, V] {
+	it.current = it.current.next
+	return it
+}
+
+// Prev moves the iterator to the previous node in the list.
+// It returns the updated iterator pointing to the previous node.
+func (it *Iterator[K, V]) Prev() *Iterator[K, V] {
+	it.current = it.current.prev
+	return it
+}
+
+// Equals checks if the current iterator points to the same node as another iterator.
+// It returns true if both iterators point to the same node, otherwise false.
+func (it *Iterator[K, V]) Equals(other *Iterator[K, V]) bool {
+	return it.Value() == other.Value()
+}
